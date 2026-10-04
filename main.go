@@ -49,15 +49,16 @@ type knob struct {
 	leftSpinKeyDown  bool
 	rightSpinKeyDown bool
 	loc              int
+	size             int
 	knobDirection    int // anticlockwise == -1, clockwise == 1, none == 0
 }
 
 // update the knob state and return it's new location
 func (k *knob) gameStep() int {
 	if k.knobDirection == ANTICLOCKWISE_SPIN {
-		k.loc -= 1
+		k.loc = max(0, k.loc-1)
 	} else if k.knobDirection == CLOCKWISE_SPIN {
-		k.loc += 1
+		k.loc = min(k.loc+1, k.size-1)
 	}
 
 	return k.loc
@@ -142,6 +143,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.wHeight = msg.Height
 		m.wWidth = msg.Width
+		m.leftKnob.size = msg.Width
+		m.rightKnob.size = msg.Height
 		if !m.hasStarted {
 			m.hasStarted = true
 			return m, m.gameTick()
