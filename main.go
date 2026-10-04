@@ -53,7 +53,7 @@ type knob struct {
 }
 
 // update the knob state and return it's new location
-func (k *knob) gameStep(delta time.Duration) int {
+func (k *knob) gameStep() int {
 	if k.knobDirection == ANTICLOCKWISE_SPIN {
 		k.loc -= 1
 	} else if k.knobDirection == CLOCKWISE_SPIN {
@@ -158,12 +158,8 @@ func (m *model) gameTick() tea.Cmd {
 }
 
 func (m *model) gameStep() {
-	delta := time.Now().Sub(m.stepTimeStamp)
-
-	m.leftKnob.gameStep(delta)
-	m.rightKnob.gameStep(delta)
-
-	m.stepTimeStamp = time.Now()
+	m.leftKnob.gameStep()
+	m.rightKnob.gameStep()
 }
 
 func (m *model) handleDialKeyPressed(input string) (tea.Model, tea.Cmd) {
