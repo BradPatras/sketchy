@@ -9,26 +9,20 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-const chars = "━ ┃ ┓ ┣ ┳ ┗ ┛ ┫ ╋ ┻ ┏"
 const CLOCKWISE_SPIN = -1
 const ANTICLOCKWISE_SPIN = 1
 const NO_SPIN = 0
 
-func main() {
-	p := tea.NewProgram(&model{
-		leftKnob: &knob{
-			leftSpinKey:  "d",
-			rightSpinKey: "f",
-		},
-		rightKnob: &knob{
-			leftSpinKey:  "j",
-			rightSpinKey: "k",
-		},
-	})
-	if _, err := p.Run(); err != nil {
-		log.Fatal(err)
-	}
-}
+type TickMsg time.Time
+
+type CellFlags int
+
+const (
+	n CellFlags = 1 << iota
+	e
+	s
+	w
+)
 
 type loc struct {
 	x float64
@@ -105,7 +99,7 @@ func (k *knob) handleKeyRelease(key string) {
 
 type model struct {
 	hasStarted    bool
-	cells         [][]cell
+	cells         [][]CellFlags
 	leftKnob      *knob
 	rightKnob     *knob
 	stepTimeStamp time.Time
@@ -113,7 +107,21 @@ type model struct {
 	wHeight       int
 }
 
-type TickMsg time.Time
+func main() {
+	p := tea.NewProgram(&model{
+		leftKnob: &knob{
+			leftSpinKey:  "d",
+			rightSpinKey: "f",
+		},
+		rightKnob: &knob{
+			leftSpinKey:  "j",
+			rightSpinKey: "k",
+		},
+	})
+	if _, err := p.Run(); err != nil {
+		log.Fatal(err)
+	}
+}
 
 func (m *model) Init() tea.Cmd {
 	return nil
@@ -158,6 +166,35 @@ func (m *model) gameTick() tea.Cmd {
 	return tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
 		return TickMsg(t)
 	})
+}
+
+func hmmmm() {
+	// each pixel can be any of these characters
+	const chars = "┃ ┣ ┫ ╋ ━ ┓ ┏ ┳ ┻ ┗ ┛"
+
+	// when the stylus moves between two pixels, it 'links' them.
+	// The stylus doesn't 'draw' the pixel character until it _leaves_ the cell. To draw the correct rune, we need to know
+	// from which direction the stylus entered the cell and to which direction it exited. Only then do we have all the info
+	// required to draw the correct rune.  Drawing the cell's rune must be additive because a cell can be traversed multiple
+	// times from the same or different directions. Because of this, the cell's rune can be modeled with bitwise flags.
+	// Since there are 4 entrances/exits to a cell (one for each face) all the possible cells can be represented with the binary
+	// number: 1111. We can use cardinal directions to help us talk about the different directions. 1111:nesw: north, east, south, west.
+	// So a cell with a flag value of '1011' would map to "┫".
+}
+
+// since flags are just an int, I can fetch the corresponding rune by making an
+// array that lists them in numerical order.
+// Technically it should be impossible to have only one flag present, since a traversal
+// consists of an enter and exit. i'll mark the impossible positions with a bullet.
+// So this array is basically: 0000, 0001, 0010, 0011, etc
+var runesInFlagOrder = [16]rune{' ', '•', '•', '┓', '•', '━', '┏', '┳', '•', '┛', '┃', '┫', '┗', '┻', '┣', '╋'}
+
+func getRuneForFlags(flags CellFlags) rune {
+	if flags < 15 && flags > 0 {
+		return runesInFlagOrder[flags]
+	} else {
+		return '!'
+	}
 }
 
 func (m *model) gameStep() {
