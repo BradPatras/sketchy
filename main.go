@@ -7,10 +7,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/imacks/bitflags-go"
 )
 
-const CLOCKWISE_SPIN = -1
-const ANTICLOCKWISE_SPIN = 1
+const CLOCKWISE_SPIN = 1
+const ANTICLOCKWISE_SPIN = -1
 const NO_SPIN = 0
 
 type TickMsg time.Time
@@ -25,81 +26,13 @@ const (
 )
 
 type loc struct {
-	x float64
-	y float64
-}
-
-type cell struct {
-	n bool
-	e bool
-	s bool
-	w bool
-}
-
-// a model of the knob that controls one axis of stylus movement
-type knob struct {
-	leftSpinKey      string
-	rightSpinKey     string
-	leftSpinKeyDown  bool
-	rightSpinKeyDown bool
-	loc              int
-	size             int
-	knobDirection    int // anticlockwise == -1, clockwise == 1, none == 0
-}
-
-// update the knob state and return it's new location
-func (k *knob) gameStep() int {
-	if k.knobDirection == ANTICLOCKWISE_SPIN {
-		k.loc = max(0, k.loc-1)
-	} else if k.knobDirection == CLOCKWISE_SPIN {
-		k.loc = min(k.loc+1, k.size-1)
-	}
-
-	return k.loc
-}
-
-func (k *knob) handleKeyPress(key string) {
-	if key == k.leftSpinKey {
-		k.leftSpinKeyDown = true
-	} else if key == k.rightSpinKey {
-		k.rightSpinKeyDown = true
-	}
-
-	// pressing both keys deadlocks the knob
-	if k.leftSpinKeyDown && k.rightSpinKeyDown {
-		k.knobDirection = NO_SPIN
-	} else if k.leftSpinKeyDown {
-		k.knobDirection = ANTICLOCKWISE_SPIN
-	} else if k.rightSpinKeyDown {
-		k.knobDirection = CLOCKWISE_SPIN
-	} else {
-		k.knobDirection = NO_SPIN
-	}
-}
-
-func (k *knob) handleKeyRelease(key string) {
-	if key != k.leftSpinKey && key != k.rightSpinKey {
-		return
-	}
-
-	if key == k.leftSpinKey {
-		k.leftSpinKeyDown = false
-	} else if key == k.rightSpinKey {
-		k.rightSpinKeyDown = false
-	}
-
-	if k.leftSpinKeyDown {
-		k.knobDirection = ANTICLOCKWISE_SPIN
-	} else if k.rightSpinKeyDown {
-		k.knobDirection = CLOCKWISE_SPIN
-	} else {
-		k.knobDirection = NO_SPIN
-	}
+	x int
+	y int
 }
 
 type model struct {
 	hasStarted    bool
-	cells         [][]CellFlags
+	pixelGrid     [][]CellFlags
 	leftKnob      *knob
 	rightKnob     *knob
 	stepTimeStamp time.Time
@@ -155,11 +88,26 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.rightKnob.size = msg.Height
 		if !m.hasStarted {
 			m.hasStarted = true
-			return m, m.gameTick()
+			return m, m.startGame()
 		}
 	}
 
 	return m, cmd
+}
+
+func (m *model) startGame() tea.Cmd {
+	grid := make([][]CellFlags, m.wWidth)
+	for x := range m.wWidth {
+		grid[x] = make([]CellFlags, m.wHeight)
+		for y := range m.wHeight {
+			grid[x][y] = 0
+		}
+	}
+	m.pixelGrid = grid
+	m.leftKnob.loc = m.wWidth / 2
+	m.rightKnob.loc = m.wHeight / 2
+
+	return m.gameTick()
 }
 
 func (m *model) gameTick() tea.Cmd {
@@ -172,22 +120,19 @@ func hmmmm() {
 	// each pixel can be any of these characters
 	const chars = "┃ ┣ ┫ ╋ ━ ┓ ┏ ┳ ┻ ┗ ┛"
 
-	// when the stylus moves between two pixels, it 'links' them.
-	// The stylus doesn't 'draw' the pixel character until it _leaves_ the cell. To draw the correct rune, we need to know
-	// from which direction the stylus entered the cell and to which direction it exited. Only then do we have all the info
-	// required to draw the correct rune.  Drawing the cell's rune must be additive because a cell can be traversed multiple
-	// times from the same or different directions. Because of this, the cell's rune can be modeled with bitwise flags.
+	// when the stylus moves between two pixels, it 'links' them. To draw the correct rune, we need to know from which
+	// direction the stylus entered the cell and to which direction it exited the previous cell. Only then do we have all the info
+	// required to draw the correct runes.  Drawing the cell runes must be additive because a cell can be traversed multiple
+	// times from the same or different directions. Because of this, we'll model the cell's rune with bitwise flags.
 	// Since there are 4 entrances/exits to a cell (one for each face) all the possible cells can be represented with the binary
-	// number: 1111. We can use cardinal directions to help us talk about the different directions. 1111:nesw: north, east, south, west.
+	// number: 1111. We can use cardinal directions to help us talk about the different directions. 1111: north, east, south, west.
 	// So a cell with a flag value of '1011' would map to "┫".
 }
 
 // since flags are just an int, I can fetch the corresponding rune by making an
 // array that lists them in numerical order.
-// Technically it should be impossible to have only one flag present, since a traversal
-// consists of an enter and exit. i'll mark the impossible positions with a bullet.
 // So this array is basically: 0000, 0001, 0010, 0011, etc
-var runesInFlagOrder = [16]rune{' ', '•', '•', '┓', '•', '━', '┏', '┳', '•', '┛', '┃', '┫', '┗', '┻', '┣', '╋'}
+var runesInFlagOrder = [16]rune{' ', '╸', '╻', '┓', '╺', '━', '┏', '┳', '╹', '┛', '┃', '┫', '┗', '┻', '┣', '╋'}
 
 func getRuneForFlags(flags CellFlags) rune {
 	if flags < 15 && flags > 0 {
@@ -198,8 +143,42 @@ func getRuneForFlags(flags CellFlags) rune {
 }
 
 func (m *model) gameStep() {
-	m.leftKnob.gameStep()
-	m.rightKnob.gameStep()
+	// take current stylus location
+	oldLoc := loc{m.leftKnob.loc, m.rightKnob.loc}
+	oldVal := m.pixelGrid[oldLoc.x][oldLoc.y]
+	// step stylus state and collect the horizontal and vertical deltas
+	hDelta := m.leftKnob.gameStep()
+	vDelta := m.rightKnob.gameStep()
+	// take new stylus position
+	newLoc := loc{m.leftKnob.loc, m.rightKnob.loc}
+	newVal := m.pixelGrid[newLoc.x][newLoc.y]
+	// use stylus movement deltas to update flags in previous cell and in new location cell
+	// first handle all the diagonal cases, those require the most work.
+	if hDelta == 1 && vDelta == 1 {
+		// SE
+	} else if hDelta == -1 && vDelta == -1 {
+		// NW
+	} else if hDelta == -1 && vDelta == 1 {
+		// SW
+	} else if hDelta == 1 && vDelta == -1 {
+		// NE
+	} else if hDelta == 1 {
+		// E
+		m.pixelGrid[oldLoc.x][oldLoc.y] = bitflags.Set(oldVal, e)
+		m.pixelGrid[newLoc.x][newLoc.y] = bitflags.Set(newVal, w)
+	} else if hDelta == -1 {
+		// W
+		m.pixelGrid[oldLoc.x][oldLoc.y] = bitflags.Set(oldVal, w)
+		m.pixelGrid[newLoc.x][newLoc.y] = bitflags.Set(newVal, e)
+	} else if vDelta == 1 {
+		// S
+		m.pixelGrid[oldLoc.x][oldLoc.y] = bitflags.Set(oldVal, s)
+		m.pixelGrid[newLoc.x][newLoc.y] = bitflags.Set(newVal, n)
+	} else if vDelta == -1 {
+		// N
+		m.pixelGrid[oldLoc.x][oldLoc.y] = bitflags.Set(oldVal, n)
+		m.pixelGrid[newLoc.x][newLoc.y] = bitflags.Set(newVal, s)
+	}
 }
 
 func (m *model) handleDialKeyPressed(input string) (tea.Model, tea.Cmd) {
@@ -241,4 +220,63 @@ func (m *model) screenView() tea.View {
 	v.KeyboardEnhancements.ReportEventTypes = true
 	v.AltScreen = true
 	return v
+}
+
+// a model of the knob that controls one axis of stylus movement
+type knob struct {
+	leftSpinKey      string
+	rightSpinKey     string
+	leftSpinKeyDown  bool
+	rightSpinKeyDown bool
+	loc              int
+	size             int
+	knobDirection    int // anticlockwise == -1, clockwise == 1, none == 0
+}
+
+// update the knob state and return it's location delta.
+// It's position value will only ever change by 1 per call of this func.
+func (k *knob) gameStep() int {
+	modification := k.knobDirection
+	k.loc = max(0, min(k.loc+modification, k.size-1))
+
+	return modification
+}
+
+func (k *knob) handleKeyPress(key string) {
+	if key == k.leftSpinKey {
+		k.leftSpinKeyDown = true
+	} else if key == k.rightSpinKey {
+		k.rightSpinKeyDown = true
+	}
+
+	// pressing both keys deadlocks the knob
+	if k.leftSpinKeyDown && k.rightSpinKeyDown {
+		k.knobDirection = NO_SPIN
+	} else if k.leftSpinKeyDown {
+		k.knobDirection = ANTICLOCKWISE_SPIN
+	} else if k.rightSpinKeyDown {
+		k.knobDirection = CLOCKWISE_SPIN
+	} else {
+		k.knobDirection = NO_SPIN
+	}
+}
+
+func (k *knob) handleKeyRelease(key string) {
+	if key != k.leftSpinKey && key != k.rightSpinKey {
+		return
+	}
+
+	if key == k.leftSpinKey {
+		k.leftSpinKeyDown = false
+	} else if key == k.rightSpinKey {
+		k.rightSpinKeyDown = false
+	}
+
+	if k.leftSpinKeyDown {
+		k.knobDirection = ANTICLOCKWISE_SPIN
+	} else if k.rightSpinKeyDown {
+		k.knobDirection = CLOCKWISE_SPIN
+	} else {
+		k.knobDirection = NO_SPIN
+	}
 }
