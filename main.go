@@ -19,10 +19,10 @@ type TickMsg time.Time
 type CellFlags int
 
 const (
-	n CellFlags = 1 << iota
-	e
+	w CellFlags = 1 << iota
 	s
-	w
+	e
+	n
 )
 
 type loc struct {
@@ -116,26 +116,13 @@ func (m *model) gameTick() tea.Cmd {
 	})
 }
 
-func hmmmm() {
-	// each pixel can be any of these characters
-	const chars = "┃ ┣ ┫ ╋ ━ ┓ ┏ ┳ ┻ ┗ ┛"
-
-	// when the stylus moves between two pixels, it 'links' them. To draw the correct rune, we need to know from which
-	// direction the stylus entered the cell and to which direction it exited the previous cell. Only then do we have all the info
-	// required to draw the correct runes.  Drawing the cell runes must be additive because a cell can be traversed multiple
-	// times from the same or different directions. Because of this, we'll model the cell's rune with bitwise flags.
-	// Since there are 4 entrances/exits to a cell (one for each face) all the possible cells can be represented with the binary
-	// number: 1111. We can use cardinal directions to help us talk about the different directions. 1111: north, east, south, west.
-	// So a cell with a flag value of '1011' would map to "┫".
-}
-
 // since flags are just an int, I can fetch the corresponding rune by making an
 // array that lists them in numerical order.
 // So this array is basically: 0000, 0001, 0010, 0011, etc
 var runesInFlagOrder = [16]rune{' ', '╸', '╻', '┓', '╺', '━', '┏', '┳', '╹', '┛', '┃', '┫', '┗', '┻', '┣', '╋'}
 
 func getRuneForFlags(flags CellFlags) rune {
-	if flags < 15 && flags > 0 {
+	if int(flags) <= 15 && int(flags) >= 0 {
 		return runesInFlagOrder[flags]
 	} else {
 		return '!'
@@ -156,12 +143,28 @@ func (m *model) gameStep() {
 	// first handle all the diagonal cases, those require the most work.
 	if hDelta == 1 && vDelta == 1 {
 		// SE
+		m.pixelGrid[oldLoc.x][oldLoc.y] = bitflags.Set(oldVal, s)
+		m.pixelGrid[newLoc.x][newLoc.y] = bitflags.Set(newVal, w)
+		diagVal := m.pixelGrid[oldLoc.x][oldLoc.y+1]
+		m.pixelGrid[oldLoc.x][oldLoc.y+1] = bitflags.Set(diagVal, n, e)
 	} else if hDelta == -1 && vDelta == -1 {
 		// NW
+		m.pixelGrid[oldLoc.x][oldLoc.y] = bitflags.Set(oldVal, n)
+		m.pixelGrid[newLoc.x][newLoc.y] = bitflags.Set(newVal, e)
+		diagVal := m.pixelGrid[oldLoc.x][oldLoc.y-1]
+		m.pixelGrid[oldLoc.x][oldLoc.y-1] = bitflags.Set(diagVal, s, w)
 	} else if hDelta == -1 && vDelta == 1 {
 		// SW
+		m.pixelGrid[oldLoc.x][oldLoc.y] = bitflags.Set(oldVal, s)
+		m.pixelGrid[newLoc.x][newLoc.y] = bitflags.Set(newVal, e)
+		diagVal := m.pixelGrid[oldLoc.x][oldLoc.y+1]
+		m.pixelGrid[oldLoc.x][oldLoc.y+1] = bitflags.Set(diagVal, n, w)
 	} else if hDelta == 1 && vDelta == -1 {
 		// NE
+		m.pixelGrid[oldLoc.x][oldLoc.y] = bitflags.Set(oldVal, n)
+		m.pixelGrid[newLoc.x][newLoc.y] = bitflags.Set(newVal, w)
+		diagVal := m.pixelGrid[oldLoc.x][oldLoc.y-1]
+		m.pixelGrid[oldLoc.x][oldLoc.y-1] = bitflags.Set(diagVal, s, e)
 	} else if hDelta == 1 {
 		// E
 		m.pixelGrid[oldLoc.x][oldLoc.y] = bitflags.Set(oldVal, e)
@@ -204,15 +207,9 @@ func (m *model) View() tea.View {
 
 func (m *model) screenView() tea.View {
 	var sb strings.Builder
-	for i := range m.wHeight {
-		for j := range m.wWidth {
-			y := m.leftKnob.loc
-			x := m.rightKnob.loc
-			if j == y && i == x {
-				sb.WriteRune('•')
-			} else {
-				sb.WriteRune(' ')
-			}
+	for y := range len(m.pixelGrid[0]) {
+		for x := range len(m.pixelGrid) {
+			sb.WriteRune(getRuneForFlags(m.pixelGrid[x][y]))
 		}
 		sb.WriteRune('\n')
 	}
@@ -236,10 +233,11 @@ type knob struct {
 // update the knob state and return it's location delta.
 // It's position value will only ever change by 1 per call of this func.
 func (k *knob) gameStep() int {
+	oldLoc := k.loc
 	modification := k.knobDirection
 	k.loc = max(0, min(k.loc+modification, k.size-1))
 
-	return modification
+	return k.loc - oldLoc
 }
 
 func (k *knob) handleKeyPress(key string) {
