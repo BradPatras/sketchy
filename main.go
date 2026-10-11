@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"math/rand/v2"
 	"strings"
 	"time"
 
@@ -13,6 +14,11 @@ import (
 const CLOCKWISE_SPIN = 1
 const ANTICLOCKWISE_SPIN = -1
 const NO_SPIN = 0
+
+const ERASE_THRESHOLD = 10
+
+const EDGE_PADDING_H = 8
+const EDGE_PADDING_v = 5
 
 type TickMsg time.Time
 
@@ -38,6 +44,7 @@ type model struct {
 	stepTimeStamp time.Time
 	wWidth        int
 	wHeight       int
+	shakeVal      int
 }
 
 func main() {
@@ -77,9 +84,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Suspend
 		case "d", "f", "j", "k":
 			return m.handleDialKeyPressed(msg.String())
+		case "space":
+			m.shakeVal += 8
 		}
 	case TickMsg:
 		m.gameStep()
+
 		return m, m.gameTick()
 	case tea.WindowSizeMsg:
 		m.wHeight = msg.Height
@@ -95,15 +105,19 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m *model) startGame() tea.Cmd {
-	grid := make([][]CellFlags, m.wWidth)
-	for x := range m.wWidth {
-		grid[x] = make([]CellFlags, m.wHeight)
-		for y := range m.wHeight {
+func createEmptyGrid(width int, height int) [][]CellFlags {
+	grid := make([][]CellFlags, width)
+	for x := range width {
+		grid[x] = make([]CellFlags, height)
+		for y := range height {
 			grid[x][y] = 0
 		}
 	}
-	m.pixelGrid = grid
+	return grid
+}
+
+func (m *model) startGame() tea.Cmd {
+	m.pixelGrid = createEmptyGrid(m.wWidth, m.wHeight)
 	m.leftKnob.loc = m.wWidth / 2
 	m.rightKnob.loc = m.wHeight / 2
 
@@ -111,7 +125,7 @@ func (m *model) startGame() tea.Cmd {
 }
 
 func (m *model) gameTick() tea.Cmd {
-	return tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg {
+	return tea.Tick(75*time.Millisecond, func(t time.Time) tea.Msg {
 		return TickMsg(t)
 	})
 }
@@ -130,6 +144,17 @@ func getRuneForFlags(flags CellFlags) rune {
 }
 
 func (m *model) gameStep() {
+	// handle screen shake/erase
+	m.shakeVal = max(0, m.shakeVal-3)
+	if m.shakeVal > ERASE_THRESHOLD {
+		m.pixelGrid = createEmptyGrid(m.wWidth, m.wHeight)
+	} else if m.shakeVal > 0 {
+		// randomly erase some cells
+		for range (m.wWidth * m.wHeight) / 2 {
+			m.pixelGrid[rand.IntN(len(m.pixelGrid))][rand.IntN(len(m.pixelGrid[0]))] = 0
+		}
+	}
+
 	// take current stylus location
 	oldLoc := loc{m.leftKnob.loc, m.rightKnob.loc}
 	oldVal := m.pixelGrid[oldLoc.x][oldLoc.y]
@@ -213,68 +238,31 @@ func (m *model) screenView() tea.View {
 		}
 		sb.WriteRune('\n')
 	}
-	v := tea.NewView(lipgloss.Place(m.wWidth, m.wHeight, lipgloss.Center, lipgloss.Center, sb.String()))
+
+	lv := m.leftKnob.getView()
+	rv := m.rightKnob.getView()
+	leftKnob := lipgloss.NewLayer(lv).X(6).Y(m.wHeight - (lipgloss.Height(lv) + 3))
+	rightKnob := lipgloss.NewLayer(rv).X(m.wWidth - (lipgloss.Width(rv) + 6)).Y(m.wHeight - (lipgloss.Height(lv) + 3))
+	drawView := lipgloss.NewLayer(lipgloss.Place(m.wWidth, m.wHeight, lipgloss.Center, lipgloss.Center, sb.String()))
+	composed := lipgloss.NewCompositor(drawView, leftKnob, rightKnob).Render()
+
+	// screen shake
+	if m.shakeVal > 0 {
+		edge := rand.IntN(4)
+		switch edge {
+		case 0:
+			composed = lipgloss.NewStyle().Padding(0, 0, 0, 1).Render(composed)
+		case 1:
+			composed = lipgloss.NewStyle().Padding(0, 0, 1, 0).Render(composed)
+		case 2:
+			composed = lipgloss.NewStyle().Padding(0, 1, 0, 0).Render(composed)
+		default:
+			composed = lipgloss.NewStyle().Padding(1, 0, 0, 0).Render(composed)
+		}
+	}
+
+	v := tea.NewView(composed)
 	v.KeyboardEnhancements.ReportEventTypes = true
 	v.AltScreen = true
 	return v
-}
-
-// a model of the knob that controls one axis of stylus movement
-type knob struct {
-	leftSpinKey      string
-	rightSpinKey     string
-	leftSpinKeyDown  bool
-	rightSpinKeyDown bool
-	loc              int
-	size             int
-	knobDirection    int // anticlockwise == -1, clockwise == 1, none == 0
-}
-
-// update the knob state and return it's location delta.
-// It's position value will only ever change by 1 per call of this func.
-func (k *knob) gameStep() int {
-	oldLoc := k.loc
-	modification := k.knobDirection
-	k.loc = max(0, min(k.loc+modification, k.size-1))
-
-	return k.loc - oldLoc
-}
-
-func (k *knob) handleKeyPress(key string) {
-	if key == k.leftSpinKey {
-		k.leftSpinKeyDown = true
-	} else if key == k.rightSpinKey {
-		k.rightSpinKeyDown = true
-	}
-
-	// pressing both keys deadlocks the knob
-	if k.leftSpinKeyDown && k.rightSpinKeyDown {
-		k.knobDirection = NO_SPIN
-	} else if k.leftSpinKeyDown {
-		k.knobDirection = ANTICLOCKWISE_SPIN
-	} else if k.rightSpinKeyDown {
-		k.knobDirection = CLOCKWISE_SPIN
-	} else {
-		k.knobDirection = NO_SPIN
-	}
-}
-
-func (k *knob) handleKeyRelease(key string) {
-	if key != k.leftSpinKey && key != k.rightSpinKey {
-		return
-	}
-
-	if key == k.leftSpinKey {
-		k.leftSpinKeyDown = false
-	} else if key == k.rightSpinKey {
-		k.rightSpinKeyDown = false
-	}
-
-	if k.leftSpinKeyDown {
-		k.knobDirection = ANTICLOCKWISE_SPIN
-	} else if k.rightSpinKeyDown {
-		k.knobDirection = CLOCKWISE_SPIN
-	} else {
-		k.knobDirection = NO_SPIN
-	}
 }

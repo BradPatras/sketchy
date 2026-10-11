@@ -2,8 +2,9 @@
 
 Etch some sketches in your terminal
 
+![demo](caps/demo.gif)
+
 ## TODO
 
-- Add "shake to clear" somehow
 - Add instructions
-- Add knobs to the screen that animate to reflect user input
+- Add frame around drawing area
