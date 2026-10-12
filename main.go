@@ -15,7 +15,8 @@ const CLOCKWISE_SPIN = 1
 const ANTICLOCKWISE_SPIN = -1
 const NO_SPIN = 0
 
-const ERASE_THRESHOLD = 10
+const CLEAR_THRESHOLD = 13
+const ERASE_THRESHOLD = 5
 
 const EDGE_PADDING_H = 8
 const EDGE_PADDING_v = 5
@@ -146,9 +147,9 @@ func getRuneForFlags(flags CellFlags) rune {
 func (m *model) gameStep() {
 	// handle screen shake/erase
 	m.shakeVal = max(0, m.shakeVal-3)
-	if m.shakeVal > ERASE_THRESHOLD {
+	if m.shakeVal > CLEAR_THRESHOLD {
 		m.pixelGrid = createEmptyGrid(m.wWidth, m.wHeight)
-	} else if m.shakeVal > 0 {
+	} else if m.shakeVal > ERASE_THRESHOLD {
 		// randomly erase some cells
 		for range (m.wWidth * m.wHeight) / 2 {
 			m.pixelGrid[rand.IntN(len(m.pixelGrid))][rand.IntN(len(m.pixelGrid[0]))] = 0
@@ -244,7 +245,8 @@ func (m *model) screenView() tea.View {
 	leftKnob := lipgloss.NewLayer(lv).X(6).Y(m.wHeight - (lipgloss.Height(lv) + 3))
 	rightKnob := lipgloss.NewLayer(rv).X(m.wWidth - (lipgloss.Width(rv) + 6)).Y(m.wHeight - (lipgloss.Height(lv) + 3))
 	drawView := lipgloss.NewLayer(lipgloss.Place(m.wWidth, m.wHeight, lipgloss.Center, lipgloss.Center, sb.String()))
-	composed := lipgloss.NewCompositor(drawView, leftKnob, rightKnob).Render()
+	toolbar := lipgloss.NewLayer(m.getToolbarView()).Y(m.wHeight - 2).Z(2)
+	composed := lipgloss.NewCompositor(drawView, leftKnob, rightKnob, toolbar).Render()
 
 	// screen shake
 	if m.shakeVal > 0 {
@@ -265,4 +267,17 @@ func (m *model) screenView() tea.View {
 	v.KeyboardEnhancements.ReportEventTypes = true
 	v.AltScreen = true
 	return v
+}
+
+func (m *model) getToolbarView() string {
+	labelStyle := lipgloss.NewStyle().Faint(true)
+	keyStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.BrightCyan)
+
+	return lipgloss.NewStyle().Width(m.wWidth).AlignHorizontal(lipgloss.Center).Border(lipgloss.NormalBorder(), true, false, false, false).Render(
+		labelStyle.Render(" rotate knobs to draw ")+keyStyle.Render("<d/f> <j/k>"),
+		labelStyle.Render(" | "),
+		labelStyle.Render("shake to erase ")+keyStyle.Render("spam <space>"),
+		labelStyle.Render(" | "),
+		labelStyle.Render("exit ")+keyStyle.Render("<q>"),
+	)
 }
