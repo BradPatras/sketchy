@@ -6,5 +6,4 @@ Etch some sketches in your terminal
 
 ## TODO
 
-- Add instructions
 - Add frame around drawing area
